@@ -15,18 +15,19 @@ import termin
 from metrics import MetricCollector
 
 BOT_TOKEN = os.getenv("TG_TOKEN")
-MIN_CHECK_INTERVAL = 15
+MIN_CHECK_INTERVAL = 1
+LATEST_DATE = '2019-12-12'
 
-DEBUG = False
-COLLECT_METRICS = True
+DEBUG = True
+COLLECT_METRICS = False
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-metric_collector = MetricCollector(os.getenv('ELASTIC_HOST'), os.getenv('ELASTIC_USER'), os.getenv('ELASTIC_PASS'),
-                                   debug_mode=not COLLECT_METRICS)
+# metric_collector = MetricCollector(os.getenv('ELASTIC_HOST'), os.getenv('ELASTIC_USER'), os.getenv('ELASTIC_PASS'),
+#                                   debug_mode=not COLLECT_METRICS)
 
 SELECTING_TERMIN_TYPE, QUERING_TERMINS, SCHEDULE_APPOINTMENT, SELECT_INTERVAL, STOP_CHECKING = range(5)
 
@@ -110,7 +111,7 @@ def quering_termins(update, context, reuse=False):
     msg.reply_text(
         'Great, wait a second while I\'m fetching available appointments for %s...' % termin_type_str)
 
-    metric_collector.log_search(user=update.effective_user.id, buro=department, appointment=termin_type_str)
+    # metric_collector.log_search(user=update.effective_user.id, buro=department, appointment=termin_type_str)
 
     appointments = get_available_appointments(department, termin_type_str)
 
@@ -150,16 +151,16 @@ def get_available_appointments(department, termin_type):
 
                 next_in = (datetime.datetime.strptime(first_date, '%Y-%m-%d').date() - datetime.date.today()).days
                 logger.info('Soonest appt at %s is %s days from today' % (caption, next_in))
-                metric_collector.log_result(department, caption, termin_type, next_in, amount=len(v['appoints'][date]))
+                # metric_collector.log_result(department, caption, termin_type, next_in, amount=len(v['appoints'][date]))
 
                 break
 
-        if first_date:
+        if first_date and (not LATEST_DATE or first_date < LATEST_DATE):
             available_appointments.append((caption, first_date, v['appoints'][first_date]))
 
     if not available_appointments:
         logger.info('Nothing found')
-        metric_collector.log_result(department, place="", appointment=termin_type)
+        # metric_collector.log_result(department, place="", appointment=termin_type)
 
     return available_appointments
 
@@ -176,7 +177,8 @@ def set_retry_interval(update, context):
     else:
         msg = update.callback_query.message if update.callback_query else update.message
         msg.reply_text(
-            f'Please type interval in minutes. Interval should greater or equal than {MIN_CHECK_INTERVAL} minutes.')
+            f"Please type interval in seconds. Interval should greater or equal than {MIN_CHECK_INTERVAL} seconds"
+            )
         return SELECT_INTERVAL
 
 
@@ -204,18 +206,18 @@ def start_interval_checking(update, context):
     Schedules a job for user which will check available appointments by interval
     """
     msg = update.message
-    minutes = update.message.text
+    seconds = update.message.text
 
     # check interval at least MIN_CHECK_INTERVAL mins
     valid_interval = True
     try:
-        if int(minutes) < MIN_CHECK_INTERVAL:
+        if int(seconds) < MIN_CHECK_INTERVAL:
             valid_interval = False
     except ValueError:
         valid_interval = False
 
     if not valid_interval:
-        msg.reply_text(f'Interval should be greater or equals than {MIN_CHECK_INTERVAL} minutes')
+        msg.reply_text(f'Interval should be greater or equals than {MIN_CHECK_INTERVAL} seconds')
         return set_retry_interval(update, context)
 
     user_id = str(update.effective_user.id)
@@ -226,13 +228,13 @@ def start_interval_checking(update, context):
             '⚠️ You had some subscription already. In order to activate the new check, I have removed the old one.')
         remove_job(user_id)
 
-    scheduler.add_job(print_available_termins, 'interval', (update, context), minutes=int(minutes), id=user_id)
+    scheduler.add_job(print_available_termins, 'interval', (update, context), seconds=int(seconds), id=user_id)
     scheduled_jobs[user_id] = datetime.datetime.now()
 
-    metric_collector.log_subscription(buro=context.user_data['buro'], appointment=context.user_data['termin_type'],
-                                      interval=minutes, user=int(user_id))
+    # metric_collector.log_subscription(buro=context.user_data['buro'], appointment=context.user_data['termin_type'],
+    #                                  interval=minutes, user=int(user_id))
 
-    msg.reply_text(f"Ok, I've started subscription with checking interval {minutes} minutes\n"
+    msg.reply_text(f"Ok, I've started subscription with checking interval {seconds} seconds\n"
                    "I will notify you if something is available")
     msg.reply_text("Please note the subscription will be automatically removed after one week "
                    "if not cancelled manually before")
